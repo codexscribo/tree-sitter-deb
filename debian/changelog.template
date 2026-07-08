@@ -1,0 +1,6 @@
+tree-sitter-cli (__VERSION__) unstable; urgency=medium
+
+  * Repackage of upstream tree-sitter __UPSTREAM_TAG__ prebuilt binary
+    (__ARCH__) from https://github.com/tree-sitter/tree-sitter/releases.
+
+ -- Fernando Silveira <fsilveira@gmail.com>  __DATE__
