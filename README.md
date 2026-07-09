@@ -120,16 +120,23 @@ tonistiigi/binfmt --install all`, or `docker/setup-qemu-action` in CI).
 
 `release.yml`:
 
-1. Triggers on a `vX.Y.Z-N` tag push, manual dispatch (optionally pinning
-   an upstream `ts_version`), or a daily schedule that checks whether
-   upstream has a new release we haven't packaged yet.
-2. Builds `.deb`s for both architectures.
-3. Runs the full install/test/uninstall matrix.
-4. Publishes (or updates) a GitHub release with the `.deb`s and a
-   `SHA256SUMS` file.
+1. Triggers on a manual dispatch (optionally pinning an upstream
+   `ts_version` and/or `deb_revision`), or a daily schedule that checks
+   whether upstream has a new release we haven't packaged yet.
+2. Resolves the target upstream tag and the package revision to publish —
+   auto-picking the next `deb_revision` for that version by scanning
+   existing release tags, unless one is passed in explicitly.
+3. Builds `.deb`s for both architectures.
+4. Runs the full install/test/uninstall matrix.
+5. Publishes (or updates) a GitHub release with the `.deb`s and a
+   `SHA256SUMS` file, creating the `vX.Y.Z-N` tag if it doesn't exist yet.
 
 The release tag/package version is `<upstream-version>-<deb-revision>`,
-e.g. `v0.26.10-1` for upstream `v0.26.10`, packaging revision 1.
+e.g. `v0.26.10-1` for upstream `v0.26.10`, packaging revision 1. The
+scheduled run skips packaging a version that already has a published
+release (of any revision); a manual dispatch always proceeds, which is how
+you re-publish a packaging-only fix under a bumped `deb_revision` without
+waiting for a new upstream release.
 
 The package's `Depends:` field is not hardcoded — `build-deb.sh` resolves it
 by running `ldd` against the packaged binary inside the build container and

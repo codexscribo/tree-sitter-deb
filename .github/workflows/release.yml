@@ -1,15 +1,14 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       ts_version:
-        description: "tree-sitter tag to package (e.g. v0.26.10) or 'latest'"
+        description: "tree-sitter tag to package (e.g. v0.26.10). Leave empty to use the latest release."
         required: false
-        default: latest
+      deb_revision:
+        description: 'Package revision to publish (Debian "debian_revision" convention). Leave empty to auto-pick the next revision. Set this to re-publish a version after a packaging-only fix, without waiting for a new upstream tree-sitter release.'
+        required: false
   schedule:
     # Daily check for a new upstream tree-sitter release. No-ops (skips the
     # rest of the workflow) if we already published a release for the
@@ -23,61 +22,75 @@ jobs:
   resolve:
     runs-on: ubuntu-latest
     outputs:
-      ts_tag: ${{ steps.resolve.outputs.ts_tag }}
-      deb_revision: ${{ steps.resolve.outputs.deb_revision }}
-      release_tag: ${{ steps.resolve.outputs.release_tag }}
-      should_release: ${{ steps.resolve.outputs.should_release }}
+      ts_tag: ${{ steps.version.outputs.ts_tag }}
+      release_exists: ${{ steps.check.outputs.exists }}
+      deb_revision: ${{ steps.revision.outputs.revision }}
+      release_tag: ${{ steps.revision.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve target version
-        id: resolve
-        env:
-          GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          REF_NAME: ${{ github.ref_name }}
-          INPUT_TS_VERSION: ${{ inputs.ts_version }}
+      - name: Determine target version
+        id: version
         run: |
-          set -euo pipefail
-          DEB_REVISION="1"
-
-          if [[ "${EVENT_NAME}" == "push" ]]; then
-            # Tag push, e.g. v0.26.10-1 -> ts_tag=v0.26.10, deb_revision=1
-            RELEASE_TAG="${REF_NAME}"
-            TS_TAG="v$(echo "${RELEASE_TAG#v}" | sed -E 's/-[0-9]+$//')"
-            DEB_REVISION="$(echo "${RELEASE_TAG}" | sed -E 's/^.*-([0-9]+)$/\1/')"
-            SHOULD_RELEASE="true"
+          if [ -n "${{ github.event.inputs.ts_version }}" ]; then
+            echo "ts_tag=${{ github.event.inputs.ts_version }}" >> "$GITHUB_OUTPUT"
           else
-            TS_VERSION_INPUT="${INPUT_TS_VERSION:-latest}"
-            if [[ "${TS_VERSION_INPUT}" == "latest" ]]; then
-              LATEST_JSON="$(curl -fsSL https://api.github.com/repos/tree-sitter/tree-sitter/releases/latest)"
-              TS_TAG="$(echo "${LATEST_JSON}" | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
-            else
-              TS_TAG="${TS_VERSION_INPUT}"
-            fi
-            RELEASE_TAG="v$(echo "${TS_TAG#v}")-${DEB_REVISION}"
-
-            if gh release view "${RELEASE_TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-              echo "Release ${RELEASE_TAG} already exists."
-              if [[ "${EVENT_NAME}" == "schedule" ]]; then
-                SHOULD_RELEASE="false"
-              else
-                # Manual re-run explicitly asked for this version: rebuild anyway.
-                SHOULD_RELEASE="true"
-              fi
-            else
-              SHOULD_RELEASE="true"
-            fi
+            tag="$(curl -fsSL https://api.github.com/repos/tree-sitter/tree-sitter/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+            echo "ts_tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "ts_tag=${TS_TAG}" | tee -a "${GITHUB_OUTPUT}"
-          echo "deb_revision=${DEB_REVISION}" | tee -a "${GITHUB_OUTPUT}"
-          echo "release_tag=${RELEASE_TAG}" | tee -a "${GITHUB_OUTPUT}"
-          echo "should_release=${SHOULD_RELEASE}" | tee -a "${GITHUB_OUTPUT}"
+      # Only the scheduled run auto-skips already-published versions: its job
+      # is just to notice new upstream tree-sitter releases. A manual dispatch
+      # is always an explicit request to publish, so it proceeds even when a
+      # release for this version already exists -- that's how you publish a
+      # packaging-only fix under a bumped deb_revision without waiting for a
+      # new upstream version.
+      - name: Check whether this version already has a release
+        id: check
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TS_TAG: ${{ steps.version.outputs.ts_tag }}
+        run: |
+          if gh release list --repo "${{ github.repository }}" --limit 500 --json tagName \
+               --jq '.[].tagName' \
+               | grep -qE "^${TS_TAG//./\\.}(-[0-9]+)?\$"; then
+            echo "A release for $TS_TAG already exists, nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Determine package revision
+        id: revision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TS_TAG: ${{ steps.version.outputs.ts_tag }}
+          INPUT_REVISION: ${{ github.event.inputs.deb_revision }}
+        run: |
+          if [ -n "$INPUT_REVISION" ]; then
+            revision="$INPUT_REVISION"
+          else
+            max=0
+            while IFS= read -r tag; do
+              [ -z "$tag" ] && continue
+              if [ "$tag" = "$TS_TAG" ]; then
+                rev=1
+              elif [[ "$tag" =~ ^${TS_TAG//./\\.}-([0-9]+)$ ]]; then
+                rev="${BASH_REMATCH[1]}"
+              else
+                continue
+              fi
+              if [ "$rev" -gt "$max" ]; then
+                max="$rev"
+              fi
+            done < <(gh release list --repo "${{ github.repository }}" --limit 500 --json tagName --jq '.[].tagName')
+            revision=$((max + 1))
+          fi
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "tag=${TS_TAG}-${revision}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: resolve
-    if: needs.resolve.outputs.should_release == 'true'
+    if: needs.resolve.outputs.release_exists != 'true'
     # The arm64 leg needs to run on a native arm64 machine: build-deb.sh uses
     # `ldd` to resolve the tree-sitter binary's shared-library dependencies,
     # which requires actually executing the target binary against real
@@ -91,7 +104,7 @@ jobs:
     env:
       DEB_REVISION: ${{ needs.resolve.outputs.deb_revision }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Build .deb (${{ matrix.arch }})
         run: |
@@ -99,7 +112,7 @@ jobs:
             --version "${{ needs.resolve.outputs.ts_tag }}" \
             --arch "${{ matrix.arch }}"
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deb-${{ matrix.arch }}
           path: dist/*.deb
@@ -107,6 +120,7 @@ jobs:
 
   test:
     needs: [resolve, build]
+    if: needs.resolve.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -127,16 +141,16 @@ jobs:
     # release.
     continue-on-error: ${{ contains(fromJSON('["ubuntu:22.04","debian:11","debian:12"]'), matrix.distro) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: deb-*
           path: dist
           merge-multiple: true
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
 
@@ -146,11 +160,12 @@ jobs:
 
   publish:
     needs: [resolve, build, test]
+    if: needs.resolve.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: deb-*
           path: dist
