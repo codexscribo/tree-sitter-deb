@@ -49,7 +49,7 @@ as-is rather than pinning an older, glibc-compatible release, so those
 three targets are tracked in CI (`continue-on-error`) but are not
 currently functional. If upstream lowers the baseline again, or you need
 a working build on those releases today, the last upstream tag unaffected
-by this regression is `v0.24.7` (`./scripts/build-deb.sh --version v0.24.7`).
+by this regression is `v0.24.7` (`./scripts/build-deb.sh v0.24.7 amd64`).
 
 ## Installing
 
@@ -79,42 +79,44 @@ sudo apt remove tree-sitter-cli
 ```
 debian/                        control/copyright/changelog templates used to build the package
 scripts/build-deb.sh           downloads the upstream binary and produces a .deb
-scripts/test-deb.sh            installs/smoke-tests/uninstalls the .deb across the distro matrix via Docker
+scripts/test-deb.sh            installs/smoke-tests/uninstalls a single .deb inside a container
 .github/workflows/release.yml  builds, tests, and publishes a GitHub release
 ```
 
 ## Building locally
 
 Requires `docker`, `curl`, and `bash`. `ldd`/`dpkg-deb` themselves run
-inside a `debian:12` container, so this works from macOS or any Linux host
-without installing Debian tooling locally.
+inside a `debian:13` container, so this works from macOS or any Linux host
+without installing Debian tooling locally. One architecture per invocation:
 
 ```sh
-# Build both architectures for the latest upstream release
-./scripts/build-deb.sh --version latest --arch all
+# Build the latest upstream release, packaging revision 1
+./scripts/build-deb.sh latest amd64
+./scripts/build-deb.sh latest arm64
 
-# Build a specific upstream version / architecture
-./scripts/build-deb.sh --version v0.26.10 --arch amd64
+# Build a specific upstream version / revision
+./scripts/build-deb.sh v0.26.10 amd64 2
 ```
 
 Output goes to `dist/`.
 
 ## Testing locally
 
-```sh
-# Full matrix (6 distros x 2 arches) — needs qemu for arm64 emulation
-./scripts/test-deb.sh
+`test-deb.sh` installs/smoke-tests/uninstalls one `.deb` and expects to run
+as root inside the target distro's container already — it doesn't invoke
+Docker itself. Run it the same way `release.yml` does, once per
+distro/arch combination you want to check:
 
-# A single combination
-./scripts/test-deb.sh --arch amd64 --distro debian:12
+```sh
+docker run --rm --platform linux/amd64 \
+  -v "$PWD:/w" -w /w debian:13 \
+  ./scripts/test-deb.sh ./dist/tree-sitter-cli_0.26.10-1_amd64.deb 0.26.10
 ```
 
-Each combination: installs the `.deb` in a fresh container, checks
-`tree-sitter --version`/`--help` run and the binary is on `PATH`, removes
-the package, and confirms the binary is gone. On non-Linux/amd64 hosts
-(e.g. Apple Silicon or when testing `arm64` from an `amd64` runner), Docker
-needs multi-arch emulation enabled (`docker run --privileged --rm
-tonistiigi/binfmt --install all`, or `docker/setup-qemu-action` in CI).
+On non-Linux/amd64 hosts (e.g. Apple Silicon, or testing `arm64` from an
+`amd64` host), Docker needs multi-arch emulation enabled (`docker run
+--privileged --rm tonistiigi/binfmt --install all`, or
+`docker/setup-qemu-action` in CI).
 
 ## Release process
 

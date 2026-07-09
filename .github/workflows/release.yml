@@ -1,4 +1,4 @@
-name: Release
+name: Build and release tree-sitter-cli .deb packages
 
 on:
   workflow_dispatch:
@@ -19,7 +19,7 @@ permissions:
   contents: write
 
 jobs:
-  resolve:
+  determine-version:
     runs-on: ubuntu-latest
     outputs:
       ts_tag: ${{ steps.version.outputs.ts_tag }}
@@ -33,7 +33,7 @@ jobs:
           if [ -n "${{ github.event.inputs.ts_version }}" ]; then
             echo "ts_tag=${{ github.event.inputs.ts_version }}" >> "$GITHUB_OUTPUT"
           else
-            tag="$(curl -fsSL https://api.github.com/repos/tree-sitter/tree-sitter/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"tag_name": *"([^"]+)".*/\1/')"
+            tag="$(curl -fsSL https://api.github.com/repos/tree-sitter/tree-sitter/releases/latest | jq -r .tag_name)"
             echo "ts_tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 
@@ -89,8 +89,8 @@ jobs:
           echo "tag=${TS_TAG}-${revision}" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: resolve
-    if: needs.resolve.outputs.release_exists != 'true'
+    needs: determine-version
+    if: needs.determine-version.outputs.release_exists != 'true'
     # The arm64 leg needs to run on a native arm64 machine: build-deb.sh uses
     # `ldd` to resolve the tree-sitter binary's shared-library dependencies,
     # which requires actually executing the target binary against real
@@ -101,16 +101,11 @@ jobs:
     strategy:
       matrix:
         arch: [amd64, arm64]
-    env:
-      DEB_REVISION: ${{ needs.resolve.outputs.deb_revision }}
     steps:
       - uses: actions/checkout@v7
 
-      - name: Build .deb (${{ matrix.arch }})
-        run: |
-          ./scripts/build-deb.sh \
-            --version "${{ needs.resolve.outputs.ts_tag }}" \
-            --arch "${{ matrix.arch }}"
+      - name: Build .deb
+        run: scripts/build-deb.sh "${{ needs.determine-version.outputs.ts_tag }}" "${{ matrix.arch }}" "${{ needs.determine-version.outputs.deb_revision }}"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -119,8 +114,8 @@ jobs:
           if-no-files-found: error
 
   test:
-    needs: [resolve, build]
-    if: needs.resolve.outputs.release_exists != 'true'
+    needs: [determine-version, build]
+    if: needs.determine-version.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -155,12 +150,19 @@ jobs:
           platforms: arm64
 
       - name: Install / smoke-test / uninstall on ${{ matrix.distro }} (${{ matrix.arch }})
+        env:
+          TS_TAG: ${{ needs.determine-version.outputs.ts_tag }}
+          DEB_REVISION: ${{ needs.determine-version.outputs.deb_revision }}
         run: |
-          ./scripts/test-deb.sh --arch "${{ matrix.arch }}" --distro "${{ matrix.distro }}"
+          version_number="${TS_TAG#v}"
+          deb_version="${version_number}-${DEB_REVISION}"
+          docker run --rm --platform "linux/${{ matrix.arch }}" \
+            -v "$PWD:/w" -w /w "${{ matrix.distro }}" \
+            ./scripts/test-deb.sh "./dist/tree-sitter-cli_${deb_version}_${{ matrix.arch }}.deb" "$version_number"
 
-  publish:
-    needs: [resolve, build, test]
-    if: needs.resolve.outputs.release_exists != 'true'
+  release:
+    needs: [determine-version, build, test]
+    if: needs.determine-version.outputs.release_exists != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -180,14 +182,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="${{ needs.resolve.outputs.release_tag }}"
-          TS_TAG="${{ needs.resolve.outputs.ts_tag }}"
+          TAG="${{ needs.determine-version.outputs.release_tag }}"
+          TS_TAG="${{ needs.determine-version.outputs.ts_tag }}"
 
-          if ! git rev-parse "${TAG}" >/dev/null 2>&1; then
-            git tag "${TAG}"
-            git push origin "${TAG}"
-          fi
-
+          # gh release create auto-creates the tag (from the current
+          # default-branch tip) if it doesn't already exist, so no separate
+          # git tag/push step is needed here.
           if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release upload "${TAG}" dist/*.deb dist/SHA256SUMS --repo "${GITHUB_REPOSITORY}" --clobber
           else
