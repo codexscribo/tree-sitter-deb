@@ -1,1 +1,5 @@
 /dist/
+*.tar.gz
+*.deb
+work/
+pkgroot/

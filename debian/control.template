@@ -5,7 +5,7 @@ Priority: optional
 Architecture: __ARCH__
 Maintainer: Fernando Silveira <fsilveira@gmail.com>
 Homepage: https://tree-sitter.github.io/tree-sitter/
-Depends: libc6 (>= 2.31), libgcc-s1
+Depends: __DEPENDS__
 Installed-Size: __INSTALLED_SIZE__
 Description: command-line tool for Tree-sitter parsers
  Tree-sitter is a parser generator tool and an incremental parsing

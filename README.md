@@ -49,7 +49,7 @@ as-is rather than pinning an older, glibc-compatible release, so those
 three targets are tracked in CI (`continue-on-error`) but are not
 currently functional. If upstream lowers the baseline again, or you need
 a working build on those releases today, the last upstream tag unaffected
-by this regression is `v0.24.7` (`./scripts/build.sh --version v0.24.7`).
+by this regression is `v0.24.7` (`./scripts/build-deb.sh --version v0.24.7`).
 
 ## Installing
 
@@ -77,25 +77,24 @@ sudo apt remove tree-sitter-cli
 ## Repository layout
 
 ```
-debian/                 control/copyright/changelog templates used to build the package
-scripts/build.sh        downloads the upstream binary and produces a .deb
-scripts/test.sh         installs/smoke-tests/uninstalls the .deb across the distro matrix via Docker
-.github/workflows/ci.yml       builds + tests on every push/PR to main
+debian/                        control/copyright/changelog templates used to build the package
+scripts/build-deb.sh           downloads the upstream binary and produces a .deb
+scripts/test-deb.sh            installs/smoke-tests/uninstalls the .deb across the distro matrix via Docker
 .github/workflows/release.yml  builds, tests, and publishes a GitHub release
 ```
 
 ## Building locally
 
-Requires `docker`, `curl`, and `bash`. `dpkg-deb` itself runs inside a
-`debian:12` container, so this works from macOS or any Linux host without
-installing Debian tooling locally.
+Requires `docker`, `curl`, and `bash`. `ldd`/`dpkg-deb` themselves run
+inside a `debian:12` container, so this works from macOS or any Linux host
+without installing Debian tooling locally.
 
 ```sh
 # Build both architectures for the latest upstream release
-./scripts/build.sh --version latest --arch all
+./scripts/build-deb.sh --version latest --arch all
 
 # Build a specific upstream version / architecture
-./scripts/build.sh --version v0.26.10 --arch amd64
+./scripts/build-deb.sh --version v0.26.10 --arch amd64
 ```
 
 Output goes to `dist/`.
@@ -104,10 +103,10 @@ Output goes to `dist/`.
 
 ```sh
 # Full matrix (6 distros x 2 arches) — needs qemu for arm64 emulation
-./scripts/test.sh
+./scripts/test-deb.sh
 
 # A single combination
-./scripts/test.sh --arch amd64 --distro debian:12
+./scripts/test-deb.sh --arch amd64 --distro debian:12
 ```
 
 Each combination: installs the `.deb` in a fresh container, checks
@@ -131,6 +130,13 @@ tonistiigi/binfmt --install all`, or `docker/setup-qemu-action` in CI).
 
 The release tag/package version is `<upstream-version>-<deb-revision>`,
 e.g. `v0.26.10-1` for upstream `v0.26.10`, packaging revision 1.
+
+The package's `Depends:` field is not hardcoded — `build-deb.sh` resolves it
+by running `ldd` against the packaged binary inside the build container and
+mapping each shared library it needs back to the Debian package that owns
+it. If a future upstream release picks up a new shared-library dependency
+not already covered by the base build image, the build fails loudly instead
+of silently shipping a package with a missing `Depends:` entry.
 
 ## License
 

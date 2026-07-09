@@ -78,7 +78,13 @@ jobs:
   build:
     needs: resolve
     if: needs.resolve.outputs.should_release == 'true'
-    runs-on: ubuntu-latest
+    # The arm64 leg needs to run on a native arm64 machine: build-deb.sh uses
+    # `ldd` to resolve the tree-sitter binary's shared-library dependencies,
+    # which requires actually executing the target binary against real
+    # arm64 system libraries. Under QEMU emulation on an amd64 host, those
+    # libraries aren't present at the paths the arm64 dynamic linker
+    # searches, so dependency detection would silently come back wrong.
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     strategy:
       matrix:
         arch: [amd64, arm64]
@@ -89,7 +95,7 @@ jobs:
 
       - name: Build .deb (${{ matrix.arch }})
         run: |
-          ./scripts/build.sh \
+          ./scripts/build-deb.sh \
             --version "${{ needs.resolve.outputs.ts_tag }}" \
             --arch "${{ matrix.arch }}"
 
@@ -136,7 +142,7 @@ jobs:
 
       - name: Install / smoke-test / uninstall on ${{ matrix.distro }} (${{ matrix.arch }})
         run: |
-          ./scripts/test.sh --arch "${{ matrix.arch }}" --distro "${{ matrix.distro }}"
+          ./scripts/test-deb.sh --arch "${{ matrix.arch }}" --distro "${{ matrix.distro }}"
 
   publish:
     needs: [resolve, build, test]

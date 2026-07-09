@@ -75,7 +75,7 @@ for DISTRO in ${DISTROS}; do
     LABEL="${DISTRO} / ${ARCH}"
 
     if [[ -z "${DEB_FILE_HOST}" ]]; then
-      echo "SKIP  ${LABEL}: no .deb found in ${DEB_DIR} for ${ARCH} (run scripts/build.sh first)"
+      echo "SKIP  ${LABEL}: no .deb found in ${DEB_DIR} for ${ARCH} (run scripts/build-deb.sh first)"
       RESULTS+=("SKIP  ${LABEL}")
       continue
     fi
