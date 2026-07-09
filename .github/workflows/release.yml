@@ -120,21 +120,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # ubuntu:22.04, debian:11, and debian:12 are excluded: tree-sitter
+        # releases since v0.25.0 require GLIBC >= 2.39 (a known,
+        # still-unresolved upstream issue: tree-sitter/tree-sitter#4174),
+        # which those releases don't ship. The .deb installs there but the
+        # binary fails to run -- a hard binary incompatibility, not
+        # something packaging can fix.
         distro:
-          - "ubuntu:22.04"
           - "ubuntu:24.04"
           - "ubuntu:26.04"
-          - "debian:11"
-          - "debian:12"
           - "debian:13"
         arch: [amd64, arm64]
-    # tree-sitter releases since v0.25.0 require GLIBC >= 2.39 (a known,
-    # still-unresolved upstream issue: tree-sitter/tree-sitter#4174). That
-    # is not available on Debian 11/12 or Ubuntu 22.04, so the binary
-    # installs there but fails to run. Keep testing those targets for
-    # visibility, but don't let a known upstream limitation block the
-    # release.
-    continue-on-error: ${{ contains(fromJSON('["ubuntu:22.04","debian:11","debian:12"]'), matrix.distro) }}
     steps:
       - uses: actions/checkout@v7
 

@@ -16,20 +16,20 @@ the distro package.
 
 | Distro | Version | Status |
 | --- | --- | --- |
-| Ubuntu | 22.04 | ⚠️ installs, binary doesn't run (see below) |
 | Ubuntu | 24.04 | ✅ |
 | Ubuntu | 26.04 | ✅ |
-| Debian | 11 (bullseye) | ⚠️ installs, binary doesn't run (see below) |
-| Debian | 12 (bookworm) | ⚠️ installs, binary doesn't run (see below) |
 | Debian | 13 (trixie) | ✅ |
 
 Architectures: `amd64`, `arm64`.
 
 Every combination above is exercised by the test matrix, but a given
 `.deb` is architecture-specific only — the same `tree-sitter-cli_<version>_amd64.deb`
-is installed and smoke-tested across all six distro/version targets (and
+is installed and smoke-tested across all three distro/version targets (and
 likewise for `arm64`), since the upstream binary itself is not built
 differently per distro.
+
+Ubuntu 22.04, Debian 11 (bullseye), and Debian 12 (bookworm) are not
+supported and are excluded from the test matrix entirely — see below.
 
 ### Known limitation: GLIBC 2.39
 
@@ -46,10 +46,11 @@ tree-sitter: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.39' not found (re
 
 This repository always repackages the latest official upstream binary
 as-is rather than pinning an older, glibc-compatible release, so those
-three targets are tracked in CI (`continue-on-error`) but are not
-currently functional. If upstream lowers the baseline again, or you need
-a working build on those releases today, the last upstream tag unaffected
-by this regression is `v0.24.7` (`./scripts/build-deb.sh v0.24.7 amd64`).
+three targets are a hard binary incompatibility, not something packaging
+can fix, and aren't tested or supported. If upstream lowers the baseline
+again, or you need a working build on those releases today, the last
+upstream tag unaffected by this regression is `v0.24.7`
+(`./scripts/build-deb.sh v0.24.7 amd64`).
 
 ## Installing
 
