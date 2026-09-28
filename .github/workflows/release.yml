@@ -1,6 +1,8 @@
 name: Build and release tree-sitter-cli .deb packages
 
 on:
+  schedule:
+    - cron: "17 6 * * *"
   workflow_dispatch:
     inputs:
       ts_version:
@@ -9,11 +11,6 @@ on:
       deb_revision:
         description: 'Package revision to publish (Debian "debian_revision" convention). Leave empty to auto-pick the next revision. Set this to re-publish a version after a packaging-only fix, without waiting for a new upstream tree-sitter release.'
         required: false
-  schedule:
-    # Daily check for a new upstream tree-sitter release. No-ops (skips the
-    # rest of the workflow) if we already published a release for the
-    # current upstream version.
-    - cron: "17 6 * * *"
 
 permissions:
   contents: write
@@ -29,11 +26,13 @@ jobs:
     steps:
       - name: Determine target version
         id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "${{ github.event.inputs.ts_version }}" ]; then
             echo "ts_tag=${{ github.event.inputs.ts_version }}" >> "$GITHUB_OUTPUT"
           else
-            tag="$(curl -fsSL https://api.github.com/repos/tree-sitter/tree-sitter/releases/latest | jq -r .tag_name)"
+            tag="$(gh api repos/tree-sitter/tree-sitter/releases/latest --jq .tag_name)"
             echo "ts_tag=$tag" >> "$GITHUB_OUTPUT"
           fi
 
